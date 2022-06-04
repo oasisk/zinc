@@ -116,9 +116,9 @@ export default defineComponent({
       indexService.list().then((res) => {
         var counter = 1;
         indexes.value = res.data.map((data) => {
-          let storage_size = data.storage_size + " KB";
-          if (data.storage_size > 1024) {
-            storage_size = (data.storage_size / 1024).toFixed(2) + " MB";
+          let storage_size = (data.storage_size / 1024).toFixed(2) + " KB";
+          if (data.storage_size > 1024 * 1024) {
+            storage_size = (data.storage_size / 1024 / 1024).toFixed(2) + " MB";
           }
           return {
             no: counter++,

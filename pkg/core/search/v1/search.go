@@ -89,14 +89,7 @@ func Search(index *core.Index, iQuery *ZincQuery) (*SearchResponse, error) {
 		}, err
 	}
 
-	var min, max int64
-	if !iQuery.Query.StartTime.IsZero() {
-		min = iQuery.Query.StartTime.UnixNano()
-	}
-	if !iQuery.Query.EndTime.IsZero() {
-		max = iQuery.Query.EndTime.UnixNano()
-	}
-	reader, err := index.GetReader(min, max)
+	reader, err := index.GetReader()
 	if err != nil {
 		log.Printf("error accessing reader: %s", err.Error())
 	}

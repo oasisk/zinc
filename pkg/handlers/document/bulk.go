@@ -160,9 +160,6 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 
 			documentsInBatch++
 
-			// refresh index stats
-			newIndex.GainDocsCount(1)
-
 			if documentsInBatch >= batchSize {
 				for _, indexName := range indexesInThisBatch {
 					// Persist the batch to the index
@@ -225,8 +222,6 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 						batch[indexName] = index.NewBatch()
 					}
 					batch[indexName].Delete(bdoc.ID())
-					newIndex, _ := core.GetIndex(indexName)
-					newIndex.ReduceDocsCount(1)
 
 					bulkRes.Count++
 					bulkRes.Items = append(bulkRes.Items, map[string]*BulkResponseItem{

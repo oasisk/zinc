@@ -43,27 +43,12 @@ func LoadZincIndexesFromMetadata() error {
 
 		// load index analysis
 		if index.Settings != nil && index.Settings.Analysis != nil {
-			index.CachedAnalyzers, err = zincanalysis.RequestAnalyzer(index.Settings.Analysis)
+			index.Analyzers, err = zincanalysis.RequestAnalyzer(index.Settings.Analysis)
 			if err != nil {
 				return errors.New(errors.ErrorTypeRuntimeException, "parse stored analysis error").Cause(err)
 			}
 		}
 
-		// load index data
-		// var defaultSearchAnalyzer *analysis.Analyzer
-		// if index.CachedAnalyzers != nil {
-		// 	defaultSearchAnalyzer = index.CachedAnalyzers["default"]
-		// }
-		// index.Writer, err = LoadIndexWriter(index.Name, index.StorageType, defaultSearchAnalyzer)
-		// if err != nil {
-		// 	return errors.New(errors.ErrorTypeRuntimeException, "load index writer error").Cause(err)
-		// }
-
-		// load index docs count
-		index.DocsCount, _ = index.LoadDocsCount()
-
-		// load index size
-		index.ReLoadStorageSize()
 		// load in memory
 		ZINC_INDEX_LIST.Add(index)
 	}
@@ -72,27 +57,31 @@ func LoadZincIndexesFromMetadata() error {
 }
 
 func (index *Index) GetWriter() (*bluge.Writer, error) {
-	index.m.RLock()
+	index.lock.RLock()
 	w := index.Writer
-	index.m.RUnlock()
+	index.lock.RUnlock()
 	if w != nil {
 		return w, nil
 	}
 
-	index.m.Lock()
-	err := index.open(true, 0, 0)
-	index.m.Unlock()
-	return index.Writer, err
+	// open writer
+	if err := index.openWriter(); err != nil {
+		return nil, err
+	}
+	// update metadata
+	index.UpdateMetadata()
+
+	return index.Writer, nil
 }
 
-func (index *Index) GetReader(timeMin, timeMax int64) (*bluge.Reader, error) {
+func (index *Index) GetReader() (*bluge.Reader, error) {
 	var r *bluge.Reader
 	var err error
-	index.m.RLock()
+	index.lock.RLock()
 	if index.Writer != nil {
 		r, err = index.Writer.Reader()
 	}
-	index.m.RUnlock()
+	index.lock.RUnlock()
 	if err != nil {
 		return nil, err
 	}
@@ -100,39 +89,42 @@ func (index *Index) GetReader(timeMin, timeMax int64) (*bluge.Reader, error) {
 		return r, nil
 	}
 
-	// TODO cache reader
+	// open writer
+	if err = index.openWriter(); err != nil {
+		return nil, err
+	}
+	// update metadata
+	index.UpdateMetadata()
 
-	index.m.Lock()
-	err = index.open(false, timeMin, timeMax)
-	r = index.Reader.reader
-	index.Reader = nil
-	index.m.Unlock()
-	return r, err
+	return index.Writer.Reader()
 }
 
-func (index *Index) open(write bool, timeMin, timeMax int64) error {
+func (index *Index) openWriter() error {
 	var defaultSearchAnalyzer *analysis.Analyzer
-	if index.CachedAnalyzers != nil {
-		defaultSearchAnalyzer = index.CachedAnalyzers["default"]
+	if index.Analyzers != nil {
+		defaultSearchAnalyzer = index.Analyzers["default"]
 	}
 
-	if write {
-		writer, err := OpenIndexWriter(index.Name, index.StorageType, defaultSearchAnalyzer, 0, 0)
-		if err != nil {
-			return err
+	var err error
+	index.lock.Lock()
+	index.Writer, err = OpenIndexWriter(index.Name, index.StorageType, defaultSearchAnalyzer, 0, 0)
+	index.lock.Unlock()
+	return err
+}
+
+func (index *Index) UpdateMetadata() {
+	index.lock.RLock()
+	w := index.Writer
+	index.lock.RUnlock()
+	if w == nil {
+		return
+	}
+
+	if r, err := w.Reader(); err == nil {
+		if n, err := r.Count(); err == nil {
+			index.DocsCount = n
 		}
-		index.Writer = writer
-		return nil
 	}
-
-	reader, err := OpenIndexReader(index.Name, index.StorageType, defaultSearchAnalyzer, timeMin, timeMax)
-	if err != nil {
-		return err
-	}
-	index.Reader = &IndexReader{
-		reader:  reader,
-		timeMin: timeMin,
-		timeMax: timeMax,
-	}
-	return nil
+	status := w.Status()
+	index.StorageSize = status.CurOnDiskBytes
 }

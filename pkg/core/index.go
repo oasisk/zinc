@@ -16,20 +16,15 @@
 package core
 
 import (
-	"context"
 	"fmt"
-	"math"
-	"path/filepath"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/analysis"
 	"github.com/goccy/go-json"
 
-	"github.com/zinclabs/zinc/pkg/config"
 	"github.com/zinclabs/zinc/pkg/meta"
 	zincanalysis "github.com/zinclabs/zinc/pkg/uquery/analysis"
 	"github.com/zinclabs/zinc/pkg/zutils"
@@ -38,19 +33,9 @@ import (
 
 type Index struct {
 	meta.Index
-	DocsCount           int64                         `json:"docs_count"`
-	StorageSize         int64                         `json:"storage_size"`
-	StorageSizeNextTime time.Time                     `json:"-"`
-	CachedAnalyzers     map[string]*analysis.Analyzer `json:"-"`
-	Writer              *bluge.Writer                 `json:"-"`
-	Reader              *IndexReader                  `json:"-"`
-	m                   sync.RWMutex                  `json:"-"`
-}
-
-type IndexReader struct {
-	reader  *bluge.Reader
-	timeMin int64
-	timeMax int64
+	Analyzers map[string]*analysis.Analyzer `json:"-"`
+	Writer    *bluge.Writer                 `json:"-"`
+	lock      sync.RWMutex                  `json:"-"`
 }
 
 // BuildBlugeDocumentFromJSON returns the bluge document for the json document. It also updates the mapping for the fields if not found.
@@ -164,7 +149,7 @@ func (index *Index) buildField(mappings *meta.Mappings, bdoc *bluge.Document, ke
 			return fmt.Errorf("field [%s] was set type to [text] but got a %T value", key, value)
 		}
 		field = bluge.NewTextField(key, v).SearchTermPositions()
-		fieldAnalyzer, _ := zincanalysis.QueryAnalyzerForField(index.CachedAnalyzers, index.Mappings, key)
+		fieldAnalyzer, _ := zincanalysis.QueryAnalyzerForField(index.Analyzers, index.Mappings, key)
 		if fieldAnalyzer != nil {
 			field.WithAnalyzer(fieldAnalyzer)
 		}
@@ -267,7 +252,7 @@ func (index *Index) SetAnalyzers(analyzers map[string]*analysis.Analyzer) error 
 		return nil
 	}
 
-	index.CachedAnalyzers = analyzers
+	index.Analyzers = analyzers
 
 	return nil
 }
@@ -297,74 +282,13 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 	return nil
 }
 
-func (index *Index) LoadDocsCount() (int64, error) {
-	return 0, nil
-	query := bluge.NewMatchAllQuery()
-	searchRequest := bluge.NewTopNSearch(0, query).WithStandardAggregations()
-	reader, err := index.GetReader(0, 0)
-	if err != nil {
-		return 0, err
-	}
-	defer reader.Close()
-	dmi, err := reader.Search(context.Background(), searchRequest)
-	if err != nil {
-		return 0, fmt.Errorf("core.index.LoadDocsCount: error executing search: %s", err.Error())
-	}
-
-	return int64(dmi.Aggregations().Count()), nil
-}
-
-func (index *Index) LoadStorageSize() float64 {
-	size := 0.0
-	switch index.StorageType {
-	case "s3":
-		return size // TODO: implement later
-	case "minio":
-		return size // TODO: implement later
-	default:
-		path := config.Global.DataPath
-		indexLocation := filepath.Join(path, index.Name)
-		size, _ = zutils.DirSize(indexLocation)
-		return math.Round(size)
-	}
-}
-
-func (index *Index) ReLoadStorageSize() {
-	if index.StorageSizeNextTime.After(time.Now()) {
-		return // skip
-	}
-
-	index.StorageSizeNextTime = time.Now().Add(time.Minute * 10)
-	go func() {
-		atomic.StoreInt64(&index.StorageSize, int64(index.LoadStorageSize()))
-	}()
-}
-
-func (index *Index) ReduceDocsCount(n int64) {
-	atomic.AddInt64(&index.DocsCount, -n)
-	index.ReLoadStorageSize()
-}
-
-func (index *Index) GainDocsCount(n int64) {
-	atomic.AddInt64(&index.DocsCount, n)
-	index.ReLoadStorageSize()
-}
-
 func (index *Index) Close() error {
-	var err1, err2 error
-	index.m.Lock()
-	if index.Reader != nil && index.Reader.reader != nil {
-		err1 = index.Reader.reader.Close()
-		index.Reader = nil
-	}
+	var err error
+	index.lock.Lock()
 	if index.Writer != nil {
-		err2 = index.Writer.Close()
+		err = index.Writer.Close()
 		index.Writer = nil
 	}
-	index.m.Unlock()
-
-	if err1 != nil {
-		return err1
-	}
-	return err2
+	index.lock.Unlock()
+	return err
 }

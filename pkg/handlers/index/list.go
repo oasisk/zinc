@@ -34,6 +34,7 @@ func List(c *gin.Context) {
 		if index.Mappings == nil {
 			index.Mappings = meta.NewMappings()
 		}
+		index.UpdateMetadata()
 	}
 
 	sort.Slice(items, func(i, j int) bool {
