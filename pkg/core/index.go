@@ -26,6 +26,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/zinclabs/zinc/pkg/meta"
+	"github.com/zinclabs/zinc/pkg/metadata"
 	zincanalysis "github.com/zinclabs/zinc/pkg/uquery/analysis"
 	"github.com/zinclabs/zinc/pkg/zutils"
 	"github.com/zinclabs/zinc/pkg/zutils/flatten"
@@ -282,8 +283,18 @@ func (index *Index) SetMappings(mappings *meta.Mappings) error {
 	return nil
 }
 
+func (index *Index) UpdteMetadata() error {
+	index.UpdateAt = time.Now()
+	fmt.Println("update metadata", index.DocsCount, index.StorageSize)
+	return metadata.Index.Set(index.Name, index.Index)
+}
+
 func (index *Index) Close() error {
 	var err error
+	// update metadata before close
+	if err = index.UpdteMetadata(); err != nil {
+		return err
+	}
 	index.lock.Lock()
 	if index.Writer != nil {
 		err = index.Writer.Close()

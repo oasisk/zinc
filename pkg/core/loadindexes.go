@@ -36,6 +36,8 @@ func LoadZincIndexesFromMetadata() error {
 		index := new(Index)
 		index.Name = indexes[i].Name
 		index.StorageType = indexes[i].StorageType
+		index.DocsCount = indexes[i].DocsCount
+		index.StorageSize = indexes[i].StorageSize
 		index.Settings = indexes[i].Settings
 		index.Mappings = indexes[i].Mappings
 		index.Mappings = indexes[i].Mappings
@@ -75,28 +77,11 @@ func (index *Index) GetWriter() (*bluge.Writer, error) {
 }
 
 func (index *Index) GetReader() (*bluge.Reader, error) {
-	var r *bluge.Reader
-	var err error
-	index.lock.RLock()
-	if index.Writer != nil {
-		r, err = index.Writer.Reader()
-	}
-	index.lock.RUnlock()
+	w, err := index.GetWriter()
 	if err != nil {
 		return nil, err
 	}
-	if r != nil {
-		return r, nil
-	}
-
-	// open writer
-	if err = index.openWriter(); err != nil {
-		return nil, err
-	}
-	// update metadata
-	index.UpdateMetadata()
-
-	return index.Writer.Reader()
+	return w.Reader()
 }
 
 func (index *Index) openWriter() error {
